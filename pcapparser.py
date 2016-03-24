@@ -4,8 +4,9 @@ import dpkt
 import urllib
 import gzip
 import StringIO
+import string
 
-DEBUG = True
+DEBUG = False
 
 def gzdecode(data) :
     compressedstream = StringIO.StringIO(data)
@@ -28,6 +29,8 @@ def show(enermy, httplist):
     if DEBUG:
         return
     for http in httplist:
+        if args.search and args.search not in repr(http):
+            continue
         print '*******************************************************************'
         if type(http) == dpkt.http.Request:
             print '{} ==> YOU\n'.format(enermy)
@@ -37,12 +40,11 @@ def show(enermy, httplist):
             print 'YOU ==> {}\n'.format(enermy)
             print 'HTTP/{} {} {}'.format(http.version, http.status, http.reason)
 
-        if args.verbose:
-            header = http.headers
-            for i in header:
-                print '{}: {}'.format(i, header[i])
+        header = http.headers
+        for i in header:
+            print '{}: {}'.format(i, header[i])
         print '\n'
-        if http.body != None:        # Avoid error when body is empty.
+        if http.body != None and args.verbose:        # Avoid error when body is empty.
             if http.headers.get('content-encoding') == 'gzip':
                 try:
                     http.body = gzdecode(http.body)
@@ -50,8 +52,13 @@ def show(enermy, httplist):
                     print e;
             if DEBUG :
                 print len(http.body)
+            elif header.has_key('content-type') and 'image' in header['content-type']:
+                '<Here is a cute image file. But printing its contents may not be a good idea:)>'
+            elif set(http.body).issubset(set(string.printable)):
+                print urllib.unquote_plus(http.body)
             else:
-                print repr(urllib.unquote_plus(http.body))
+                print "<Oh my god, what's this? Anyway i can not print it>"
+
         print '\n\n*******************************************************************'
 
 def makestream(reql, resl):
