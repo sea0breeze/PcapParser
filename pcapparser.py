@@ -5,7 +5,7 @@ import urllib
 import gzip
 import StringIO
 
-DEBUG = False
+DEBUG = True
 
 def gzdecode(data) :
     compressedstream = StringIO.StringIO(data)
@@ -25,13 +25,9 @@ def ipparse(ipstr):
     return '{}.{}.{}.{}'.format(ip[0], ip[1], ip[2], ip[3])
 
 def show(enermy, httplist):
-    #return
-    httpdirt = {}
-    for seq, http in httplist:
-        httpdirt[seq] = http
-    for seq in sorted(httpdirt.keys()):
-        print seq
-        http = httpdirt[seq]
+    if DEBUG:
+        return
+    for http in httplist:
         print '*******************************************************************'
         if type(http) == dpkt.http.Request:
             print '{} ==> YOU\n'.format(enermy)
@@ -39,7 +35,7 @@ def show(enermy, httplist):
 
         if type(http) == dpkt.http.Response:
             print 'YOU ==> {}\n'.format(enermy)
-            print '{} {}'.format(http.status, http.reason)
+            print 'HTTP/{} {} {}'.format(http.version, http.status, http.reason)
 
         if args.verbose:
             header = http.headers
@@ -58,6 +54,55 @@ def show(enermy, httplist):
                 print repr(urllib.unquote_plus(http.body))
         print '\n\n*******************************************************************'
 
+def makestream(reql, resl):
+    reqdict = {}
+    resdict = {}
+    reqseq = min([tcp.seq for tcp in reql])
+    resseq = min([tcp.seq for tcp in resl])
+    for reqseg in reqlist:
+        reqdict[reqseg.seq] = (reqseg, len(reqseg.data))
+    for resseg in reslist:
+        resdict[resseg.seq] = (resseg, len(resseg.data))
+
+    tcpstream = []
+    reqbuffer = ''
+    resbuffer = ''
+    time = len(reql)
+    for i in range(time):
+        req, reqlength = reqdict[reqseq]
+        if DEBUG:
+            print 'Request seq: {} ack: {} len: {}'.format(req.seq, req.ack, reqlength)
+        reqseq += reqlength
+        reqbuffer += req.data
+        if req.flags & 0b1000: # PUSH is set
+            if reqbuffer[:3] == 'GET' or reqbuffer[:4] == 'POST':
+                tcpstream.append(dpkt.http.Request(reqbuffer))
+            else:              # This stream is not http!
+                if DEBUG:
+                    print repr(reqbuffer)
+                return []
+            reqbuffer = ''
+            while True:
+                res, reslength = resdict[resseq]
+                assert res.ack == reqseq
+                if DEBUG:
+                    print 'Response seq: {} ack: {} len: {}'.format(res.seq, res.ack, reslength)
+                resseq += reslength
+                resbuffer += res.data
+                if res.flags & 0b1000:  # PUSH is set
+                    if resbuffer[:4] != 'HTTP':
+                        raise Exception # This stream is not http!
+                    try:
+                        tcpstream.append(dpkt.http.Response(resbuffer))
+                        if DEBUG:
+                                print repr(tcpstream[-1].headers)
+                        resbuffer = ''
+                        break
+                    except dpkt.dpkt.UnpackError as e:
+                        continue
+    if DEBUG:
+        'One stream ends!'
+    return tcpstream
 
 parser = argparse.ArgumentParser(description='Pcap parser for ctf')
 parser.add_argument('pcapfile', type=file,
@@ -85,51 +130,21 @@ for ts, buf in pcap:
             continue
 
         tcp = ip.data
-        if tcp.dport == args.port and len(tcp.data) > 0:
+        if tcp.dport == args.port and ((ip.src == args.ip) if args.ip else 1) and len(tcp.data) > 0:
             source = (ip.src, tcp.sport)
-            if tcp.seq in [i[0] for i in httppool.get(source, [])]:
-                continue
-            dictappend(reqtmp, source, tcp.data)
-            #if tcp.sport == 52833:
-            #    print repr(ip)+'\n\n'
-            try:
-                req = dpkt.http.Request(reqtmp[source])
-                if DEBUG:
-                    print req.headers
-                if ((args.search in reqtmp[source]) if args.search else True):
-                    dictappend(httppool, source, [(tcp.seq, req)])
-                reqtmp[source] = ''
-            except dpkt.UnpackError as e:
-                if DEBUG:
-                    print '{}:{}'.format(ipparse(source[0]), source[1]),
-                    print 'length of request segment: {}'.format(len(reqtmp[source]))
-                    print ts, e
-                if reqtmp[source][:3] != 'GET' and reqtmp[source][:4] != 'POST':
-                    reqtmp[source] = ''   # The data in this TCP stream is not http!
+            dictappend(reqtmp, source, [tcp])
 
-        if tcp.sport == args.port and len(tcp.data) > 0:
+        if tcp.sport == args.port and ((ip.dst == args.ip) if args.ip else 1) and len(tcp.data) > 0:
             destination = (ip.dst, tcp.dport)
-            if tcp.seq in [i[0] for i in httppool.get(destination, [])]:
-                continue
-            dictappend(restmp, destination, tcp.data)
-            #if tcp.dport == 52833:
-            #    print repr(ip)+'\n\n'
-            try:
-                res = dpkt.http.Response(restmp[destination])
-                if DEBUG:
-                    print res.headers
-                if ((args.search in restmp[destination]) if args.search else True):
-                    dictappend(httppool, destination, [(tcp.seq, res)])
-                restmp[destination] = ''
-            except dpkt.UnpackError as e:
-                #if 'invalid' in str(e):
-                #    print repr(tcp), '{}:{}'.format(ipparse(destination[0]), destination[1])
-                if DEBUG:
-                    print '{}:{}'.format(ipparse(destination[0]), destination[1]),
-                    print 'length of response segment: {}'.format(len(restmp[destination]))
-                    print ts, e
-                if restmp[destination][:4] != 'HTTP':
-                    restmp[destination] = ''   # The data in this TCP stream is not http!
+            dictappend(restmp, destination, [tcp])
+
+for ip, port in reqtmp:
+    try:
+        reslist = restmp[(ip, port)]
+    except KeyError:
+        continue    # Requests with no responses won't be displayed.
+    reqlist = reqtmp[(ip, port)]
+    httppool[(ip, port)] = makestream(reqlist, reslist)
 
 for ip, port in httppool:
     readableIP = ipparse(ip)
