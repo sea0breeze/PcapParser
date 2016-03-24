@@ -1,5 +1,5 @@
 # PcapParser
-A simple tool which can parse pcap files. It is created for offline ctf.
+A simple command tool which can parse pcap files. It is created for offline ctf. It can follow tcp stream according to seq and ack. But its robustness is still not good.
 ## Usage
 pcapparse.py 
 [-h]
