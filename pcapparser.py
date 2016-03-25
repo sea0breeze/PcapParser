@@ -9,23 +9,43 @@ import string
 DEBUG = False
 
 def gzdecode(data) :
+    '''This function deal with gzip compressed data 
+    in http.
+    
+    '''
+    
     compressedstream = StringIO.StringIO(data)
     gziper = gzip.GzipFile(fileobj=compressedstream)
     data2 = gziper.read()
     return data2
 
 def dictappend(d, k, v):
+    '''Just a utile function. Perhaps there is
+    a better way to impletement it.
+    
+    '''
+    
     if k in d:
         d[k] += v
     else:
         d[k] = v
 
 def ipparse(ipstr):
+    '''Convert the 4-byte string representing ip address
+    to a readable string for human.
+    
+    '''
+    
     ip = map(ord, ipstr)
     assert len(ip) == 4
     return '{}.{}.{}.{}'.format(ip[0], ip[1], ip[2], ip[3])
 
 def show(enermy, httplist):
+    '''Print the message in a ordered list of dkpt.http.Requset/Response
+    objects tidily.
+    
+    '''
+    
     if DEBUG:
         return
     for http in httplist:
@@ -62,6 +82,11 @@ def show(enermy, httplist):
         print '\n\n*******************************************************************'
 
 def makestream(reql, resl):
+    '''Make a list of dkpt.http.Requset objects and a list 
+    of dpkt.http.Response from the same tcp stream ordered.
+    
+    '''
+    
     reqdict = {}
     resdict = {}
     reqseq = min([tcp.seq for tcp in reql])
